@@ -47,15 +47,27 @@ app.get('/api/wilayah/:idsubsls', async (req, res) => {
 
 app.post('/api/laporan', async (req, res) => {
   try {
-    const { tanggal, idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
-      jumlah_keluarga_non_usaha, jumlah_usaha, jumlah_bangunan_kosong, total_bangunan, catatan } = req.body;
+    const {
+      tanggal, idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
+      jumlah_keluarga_submit, jumlah_usaha_submit, jumlah_bku_submit,
+      jumlah_bangunan_kosong, total_bangunan,
+      jumlah_belum_submit, catatan_belum_submit,
+      catatan
+    } = req.body;
+
     const doc = await Laporan.findOneAndUpdate(
       { tanggal: new Date(tanggal), idsubsls },
-      { tanggal: new Date(tanggal), idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
-        jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
-        jumlah_usaha: +jumlah_usaha || 0,
-        jumlah_bangunan_kosong: +jumlah_bangunan_kosong || 0,
-        total_bangunan: +total_bangunan || 0, catatan: catatan || '' },
+      {
+        tanggal: new Date(tanggal), idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
+        jumlah_keluarga_submit:  +jumlah_keluarga_submit  || 0,
+        jumlah_usaha_submit:     +jumlah_usaha_submit     || 0,
+        jumlah_bku_submit:       +jumlah_bku_submit       || 0,
+        jumlah_bangunan_kosong:  +jumlah_bangunan_kosong  || 0,
+        total_bangunan:          +total_bangunan           || 0,
+        jumlah_belum_submit:     +jumlah_belum_submit      || 0,
+        catatan_belum_submit:    catatan_belum_submit      || '',
+        catatan:                 catatan                   || '',
+      },
       { upsert: true, new: true, runValidators: true }
     );
     res.json({ success: true, laporan: doc });
@@ -71,13 +83,25 @@ app.delete('/api/laporan/:id', async (req, res) => {
 
 app.put('/api/laporan/:id', async (req, res) => {
   try {
-    const { jumlah_keluarga_non_usaha, jumlah_usaha, jumlah_bangunan_kosong, total_bangunan, catatan } = req.body;
+    const {
+      jumlah_keluarga_submit, jumlah_usaha_submit, jumlah_bku_submit,
+      jumlah_bangunan_kosong, total_bangunan,
+      jumlah_belum_submit, catatan_belum_submit,
+      catatan
+    } = req.body;
+
     const doc = await Laporan.findByIdAndUpdate(
       req.params.id,
-      { jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
-        jumlah_usaha: +jumlah_usaha || 0,
-        jumlah_bangunan_kosong: +jumlah_bangunan_kosong || 0,
-        total_bangunan: +total_bangunan || 0, catatan: catatan || '' },
+      {
+        jumlah_keluarga_submit:  +jumlah_keluarga_submit  || 0,
+        jumlah_usaha_submit:     +jumlah_usaha_submit     || 0,
+        jumlah_bku_submit:       +jumlah_bku_submit       || 0,
+        jumlah_bangunan_kosong:  +jumlah_bangunan_kosong  || 0,
+        total_bangunan:          +total_bangunan           || 0,
+        jumlah_belum_submit:     +jumlah_belum_submit      || 0,
+        catatan_belum_submit:    catatan_belum_submit      || '',
+        catatan:                 catatan                   || '',
+      },
       { new: true, runValidators: true }
     );
     if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
@@ -95,37 +119,45 @@ app.get('/api/laporan/check', async (req, res) => {
 app.get('/api/laporan/summary', async (req, res) => {
   try {
     const match = {};
-    if (req.query.tanggal) match.tanggal = new Date(req.query.tanggal);
-    if (req.query.kecamatan) match.nmkec = req.query.kecamatan;
+    if (req.query.tanggal)   match.tanggal = new Date(req.query.tanggal);
+    if (req.query.kecamatan) match.nmkec   = req.query.kecamatan;
     const [s] = await Laporan.aggregate([
       { $match: match },
       { $group: { _id: null,
-          total_keluarga_non_usaha: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_usaha: { $sum: '$jumlah_usaha' },
-          total_bangunan_kosong: { $sum: '$jumlah_bangunan_kosong' },
-          total_bangunan: { $sum: '$total_bangunan' },
-          jumlah_laporan: { $sum: 1 },
-          jumlah_pcl: { $addToSet: '$pencacah' }
+          total_keluarga_submit:  { $sum: '$jumlah_keluarga_submit' },
+          total_usaha_submit:     { $sum: '$jumlah_usaha_submit' },
+          total_bku_submit:       { $sum: '$jumlah_bku_submit' },
+          total_bangunan_kosong:  { $sum: '$jumlah_bangunan_kosong' },
+          total_bangunan:         { $sum: '$total_bangunan' },
+          total_belum_submit:     { $sum: '$jumlah_belum_submit' },
+          jumlah_laporan:         { $sum: 1 },
+          jumlah_pcl:             { $addToSet: '$pencacah' }
         }
       }
     ]);
-    res.json(s || { total_keluarga_non_usaha:0, total_usaha:0, total_bangunan_kosong:0, total_bangunan:0, jumlah_laporan:0, jumlah_pcl:[] });
+    res.json(s || {
+      total_keluarga_submit: 0, total_usaha_submit: 0, total_bku_submit: 0,
+      total_bangunan_kosong: 0, total_bangunan: 0, total_belum_submit: 0,
+      jumlah_laporan: 0, jumlah_pcl: []
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/laporan/rekap', async (req, res) => {
   try {
     const match = {};
-    if (req.query.tanggal) match.tanggal = new Date(req.query.tanggal);
-    if (req.query.kecamatan) match.nmkec = req.query.kecamatan;
+    if (req.query.tanggal)   match.tanggal = new Date(req.query.tanggal);
+    if (req.query.kecamatan) match.nmkec   = req.query.kecamatan;
     res.json(await Laporan.aggregate([
       { $match: match },
       { $group: { _id: { kecamatan: '$nmkec', desa: '$nmdesa' },
-          total_keluarga_non_usaha: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_usaha: { $sum: '$jumlah_usaha' },
-          total_bangunan_kosong: { $sum: '$jumlah_bangunan_kosong' },
-          total_bangunan: { $sum: '$total_bangunan' },
-          jumlah_laporan: { $sum: 1 }
+          total_keluarga_submit:  { $sum: '$jumlah_keluarga_submit' },
+          total_usaha_submit:     { $sum: '$jumlah_usaha_submit' },
+          total_bku_submit:       { $sum: '$jumlah_bku_submit' },
+          total_bangunan_kosong:  { $sum: '$jumlah_bangunan_kosong' },
+          total_bangunan:         { $sum: '$total_bangunan' },
+          total_belum_submit:     { $sum: '$jumlah_belum_submit' },
+          jumlah_laporan:         { $sum: 1 }
         }
       },
       { $sort: { '_id.kecamatan': 1, '_id.desa': 1 } }
@@ -159,18 +191,25 @@ app.get('/api/leaderboard', async (req, res) => {
     const match = {};
     if (tanggal_dari || tanggal_sampai) {
       match.tanggal = {};
-      if (tanggal_dari)  match.tanggal.$gte = new Date(tanggal_dari);
+      if (tanggal_dari)   match.tanggal.$gte = new Date(tanggal_dari);
       if (tanggal_sampai) match.tanggal.$lte = new Date(tanggal_sampai);
     }
     if (kecamatan) match.nmkec = kecamatan;
     const rows = await Laporan.aggregate([
       { $match: match },
-      { $group: { _id: '$pencacah', nmkec: { $first: '$nmkec' }, pengawas: { $first: '$pengawas' },
-          total_usaha: { $sum: '$jumlah_usaha' }, total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_bangunan: { $sum: '$total_bangunan' }, hari_lapor: { $sum: 1 }, terakhir_lapor: { $max: '$tanggal' }
+      { $group: { _id: '$pencacah',
+          nmkec:            { $first: '$nmkec' },
+          pengawas:         { $first: '$pengawas' },
+          total_keluarga:   { $sum: '$jumlah_keluarga_submit' },
+          total_usaha:      { $sum: '$jumlah_usaha_submit' },
+          total_bku:        { $sum: '$jumlah_bku_submit' },
+          total_bangunan:   { $sum: '$total_bangunan' },
+          total_belum:      { $sum: '$jumlah_belum_submit' },
+          hari_lapor:       { $sum: 1 },
+          terakhir_lapor:   { $max: '$tanggal' }
         }
       },
-      { $addFields: { total_terdata: { $add: ['$total_usaha','$total_keluarga'] } } },
+      { $addFields: { total_terdata: { $add: ['$total_keluarga', '$total_usaha', '$total_bku'] } } },
       { $sort: { total_terdata: -1 } }
     ]);
     res.json(rows.map((r, i) => ({ ...r, rank: i+1 })));
@@ -197,8 +236,11 @@ app.get('/api/belum-lapor', async (req, res) => {
       acc[s.nmkec].push(s);
       return acc;
     }, {});
-    res.json({ total_sls: semuaSls.length, sudah_lapor: sudahSet.size, belum_lapor: belum.length,
-      pct_selesai: semuaSls.length > 0 ? ((sudahSet.size/semuaSls.length)*100).toFixed(1) : '0', by_kecamatan: byKec });
+    res.json({
+      total_sls: semuaSls.length, sudah_lapor: sudahSet.size, belum_lapor: belum.length,
+      pct_selesai: semuaSls.length > 0 ? ((sudahSet.size/semuaSls.length)*100).toFixed(1) : '0',
+      by_kecamatan: byKec
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -212,11 +254,16 @@ app.get('/api/trend', async (req, res) => {
     const trend = await Laporan.aggregate([
       { $match: match },
       { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$tanggal' } },
-          total_usaha: { $sum: '$jumlah_usaha' }, total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_bangunan: { $sum: '$total_bangunan' }, jumlah_laporan: { $sum: 1 }
+          total_keluarga_submit: { $sum: '$jumlah_keluarga_submit' },
+          total_usaha_submit:    { $sum: '$jumlah_usaha_submit' },
+          total_bku_submit:      { $sum: '$jumlah_bku_submit' },
+          total_bangunan:        { $sum: '$total_bangunan' },
+          total_belum_submit:    { $sum: '$jumlah_belum_submit' },
+          jumlah_laporan:        { $sum: 1 }
         }
       },
-      { $sort: { _id: 1 } }, { $limit: Number(hari) }
+      { $sort: { _id: 1 } },
+      { $limit: Number(hari) }
     ]);
     res.json(trend);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -232,11 +279,17 @@ app.get('/api/export/csv', async (req, res) => {
     if (tanggal)   match.tanggal = new Date(tanggal);
     if (kecamatan) match.nmkec   = kecamatan;
     const data = await Laporan.find(match).sort({ nmkec:1, nmdesa:1 }).lean();
-    const header = 'Tanggal,Kecamatan,Desa,SLS,PCL,Pengawas,Kel Non-Usaha,Usaha,Bgn Kosong,Total Bangunan,Catatan\n';
+    const header = 'Tanggal,Kecamatan,Desa,SLS,PCL,Pengawas,Kel Submit,Usaha Submit,BKU Submit,Bgn Kosong,Total Bangunan,Belum Submit,Catatan Belum Submit,Catatan\n';
     const rows = data.map(d => [
       new Date(d.tanggal).toLocaleDateString('id-ID'),
       d.nmkec, d.nmdesa, d.nmsubsls, d.pencacah, d.pengawas,
-      d.jumlah_keluarga_non_usaha, d.jumlah_usaha, d.jumlah_bangunan_kosong, d.total_bangunan,
+      d.jumlah_keluarga_submit  ?? 0,
+      d.jumlah_usaha_submit     ?? 0,
+      d.jumlah_bku_submit       ?? 0,
+      d.jumlah_bangunan_kosong  ?? 0,
+      d.total_bangunan          ?? 0,
+      d.jumlah_belum_submit     ?? 0,
+      `"${(d.catatan_belum_submit||'').replace(/"/g,'""')}"`,
       `"${(d.catatan||'').replace(/"/g,'""')}"`
     ].join(',')).join('\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -260,12 +313,10 @@ app.get('/api/health', (req, res) => {
 const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
-  // Hanya serve index.html untuk non-API route (SPA fallback)
   app.get(/^(?!\/api).*/, (req, res) => {
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 } else {
-  // Kalau frontend belum di-build, tampilkan info API
   app.get(/^(?!\/api).*/, (req, res) => {
     res.json({ app: 'MATA SE26 API', status: 'aktif', mongodb: mongoose.connection.readyState });
   });
@@ -284,7 +335,7 @@ if (!MONGO_URI) {
 
 console.log('Connecting to MongoDB...');
 mongoose.connect(MONGO_URI, {
-  serverSelectionTimeoutMS: 30000, // 30 detik timeout (Railway bisa lambat)
+  serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
   connectTimeoutMS: 30000,
   maxPoolSize: 10,
@@ -296,5 +347,5 @@ mongoose.connect(MONGO_URI, {
 .catch(err => {
   console.error('MongoDB connection FAILED:', err.message);
   console.error('URI prefix:', MONGO_URI.slice(0, 30) + '...');
-  process.exit(1); // Railway akan restart otomatis
+  process.exit(1);
 });
