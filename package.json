@@ -1,0 +1,9 @@
+{
+  "name": "mata-se26",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "start": "cd backend && npm install && node index.js",
+    "seed": "cd backend && node seed.js"
+  }
+}

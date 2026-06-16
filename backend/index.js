@@ -1,0 +1,301 @@
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const { Wilayah, Laporan } = require('./models');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB error:', err));
+
+// ═══════════════════════════════════════════
+// WILAYAH
+// ═══════════════════════════════════════════
+
+app.get('/api/wilayah/kecamatan', async (req, res) => {
+  try { res.json((await Wilayah.distinct('nmkec')).sort()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/wilayah/desa', async (req, res) => {
+  try { res.json((await Wilayah.distinct('nmdesa', { nmkec: req.query.kecamatan })).sort()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/wilayah/sls', async (req, res) => {
+  try {
+    const q = {};
+    if (req.query.kecamatan) q.nmkec = req.query.kecamatan;
+    if (req.query.desa) q.nmdesa = req.query.desa;
+    res.json(await Wilayah.find(q, { idsubsls:1, nmsubsls:1, nmsls:1, pencacah:1, pengawas:1, _id:0 }).lean());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/wilayah/:idsubsls', async (req, res) => {
+  try {
+    const d = await Wilayah.findOne({ idsubsls: req.params.idsubsls }).lean();
+    if (!d) return res.status(404).json({ error: 'Not found' });
+    res.json(d);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// LAPORAN — CRUD
+// ═══════════════════════════════════════════
+
+app.post('/api/laporan', async (req, res) => {
+  try {
+    const { tanggal, idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
+      jumlah_keluarga_non_usaha, jumlah_usaha, jumlah_bangunan_kosong, total_bangunan, catatan } = req.body;
+    const doc = await Laporan.findOneAndUpdate(
+      { tanggal: new Date(tanggal), idsubsls },
+      { tanggal: new Date(tanggal), idsubsls, nmkec, nmdesa, nmsubsls, pencacah, pengawas,
+        jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
+        jumlah_usaha: +jumlah_usaha || 0,
+        jumlah_bangunan_kosong: +jumlah_bangunan_kosong || 0,
+        total_bangunan: +total_bangunan || 0, catatan: catatan || '' },
+      { upsert: true, new: true, runValidators: true }
+    );
+    res.json({ success: true, laporan: doc });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete('/api/laporan/:id', async (req, res) => {
+  try {
+    await Laporan.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/laporan/:id', async (req, res) => {
+  try {
+    const { jumlah_keluarga_non_usaha, jumlah_usaha, jumlah_bangunan_kosong, total_bangunan, catatan } = req.body;
+    const doc = await Laporan.findByIdAndUpdate(
+      req.params.id,
+      {
+        jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
+        jumlah_usaha:              +jumlah_usaha              || 0,
+        jumlah_bangunan_kosong:    +jumlah_bangunan_kosong    || 0,
+        total_bangunan:            +total_bangunan            || 0,
+        catatan: catatan || '',
+      },
+      { new: true, runValidators: true }
+    );
+    if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
+    res.json({ success: true, laporan: doc });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/laporan/check', async (req, res) => {
+  try {
+    const { tanggal, idsubsls } = req.query;
+    res.json(await Laporan.findOne({ tanggal: new Date(tanggal), idsubsls }).lean() || null);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/laporan/summary', async (req, res) => {
+  try {
+    const match = {};
+    if (req.query.tanggal) match.tanggal = new Date(req.query.tanggal);
+    if (req.query.kecamatan) match.nmkec = req.query.kecamatan;
+    const [s] = await Laporan.aggregate([
+      { $match: match },
+      { $group: { _id: null,
+          total_keluarga_non_usaha: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_usaha: { $sum: '$jumlah_usaha' },
+          total_bangunan_kosong: { $sum: '$jumlah_bangunan_kosong' },
+          total_bangunan: { $sum: '$total_bangunan' },
+          jumlah_laporan: { $sum: 1 },
+          jumlah_pcl: { $addToSet: '$pencacah' }
+        }
+      }
+    ]);
+    res.json(s || { total_keluarga_non_usaha:0, total_usaha:0, total_bangunan_kosong:0, total_bangunan:0, jumlah_laporan:0, jumlah_pcl:[] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/laporan/rekap', async (req, res) => {
+  try {
+    const match = {};
+    if (req.query.tanggal) match.tanggal = new Date(req.query.tanggal);
+    if (req.query.kecamatan) match.nmkec = req.query.kecamatan;
+    res.json(await Laporan.aggregate([
+      { $match: match },
+      { $group: { _id: { kecamatan: '$nmkec', desa: '$nmdesa' },
+          total_keluarga_non_usaha: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_usaha: { $sum: '$jumlah_usaha' },
+          total_bangunan_kosong: { $sum: '$jumlah_bangunan_kosong' },
+          total_bangunan: { $sum: '$total_bangunan' },
+          jumlah_laporan: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.kecamatan': 1, '_id.desa': 1 } }
+    ]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/laporan', async (req, res) => {
+  try {
+    const { tanggal, pencacah, kecamatan, desa, page=1, limit=20 } = req.query;
+    const q = {};
+    if (tanggal)  q.tanggal = new Date(tanggal);
+    if (pencacah) q.pencacah = new RegExp(pencacah, 'i');
+    if (kecamatan) q.nmkec = kecamatan;
+    if (desa) q.nmdesa = desa;
+    const skip = (Number(page)-1) * Number(limit);
+    const [data, total] = await Promise.all([
+      Laporan.find(q).sort({ tanggal:-1, created_at:-1 }).skip(skip).limit(Number(limit)).lean(),
+      Laporan.countDocuments(q)
+    ]);
+    res.json({ data, total, page: Number(page), totalPages: Math.ceil(total/Number(limit)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// LEADERBOARD PCL
+// ═══════════════════════════════════════════
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const { tanggal_dari, tanggal_sampai, kecamatan } = req.query;
+    const match = {};
+    if (tanggal_dari || tanggal_sampai) {
+      match.tanggal = {};
+      if (tanggal_dari) match.tanggal.$gte = new Date(tanggal_dari);
+      if (tanggal_sampai) match.tanggal.$lte = new Date(tanggal_sampai);
+    }
+    if (kecamatan) match.nmkec = kecamatan;
+
+    const rows = await Laporan.aggregate([
+      { $match: match },
+      { $group: {
+          _id: '$pencacah',
+          nmkec: { $first: '$nmkec' },
+          pengawas: { $first: '$pengawas' },
+          total_usaha: { $sum: '$jumlah_usaha' },
+          total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_bangunan: { $sum: '$total_bangunan' },
+          hari_lapor: { $sum: 1 },
+          terakhir_lapor: { $max: '$tanggal' }
+        }
+      },
+      { $addFields: { total_terdata: { $add: ['$total_usaha','$total_keluarga'] } } },
+      { $sort: { total_terdata: -1 } }
+    ]);
+
+    // Tambah rank
+    const ranked = rows.map((r, i) => ({ ...r, rank: i+1 }));
+    res.json(ranked);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// SLS BELUM LAPOR
+// ═══════════════════════════════════════════
+app.get('/api/belum-lapor', async (req, res) => {
+  try {
+    const { tanggal, kecamatan } = req.query;
+    if (!tanggal) return res.status(400).json({ error: 'tanggal required' });
+
+    const tgl = new Date(tanggal);
+
+    // Semua SLS di wilayah
+    const slsQuery = kecamatan ? { nmkec: kecamatan } : {};
+    const semuaSls = await Wilayah.find(slsQuery, {
+      idsubsls:1, nmsubsls:1, nmkec:1, nmdesa:1, pencacah:1, pengawas:1, _id:0
+    }).lean();
+
+    // SLS yang sudah lapor
+    const sudahLapor = await Laporan.distinct('idsubsls', { tanggal: tgl, ...(kecamatan ? { nmkec: kecamatan } : {}) });
+    const sudahSet = new Set(sudahLapor);
+
+    const belum = semuaSls.filter(s => !sudahSet.has(s.idsubsls));
+
+    // Group by kecamatan
+    const byKec = belum.reduce((acc, s) => {
+      if (!acc[s.nmkec]) acc[s.nmkec] = [];
+      acc[s.nmkec].push(s);
+      return acc;
+    }, {});
+
+    res.json({
+      total_sls: semuaSls.length,
+      sudah_lapor: sudahSet.size,
+      belum_lapor: belum.length,
+      pct_selesai: semuaSls.length > 0 ? ((sudahSet.size / semuaSls.length)*100).toFixed(1) : '0',
+      by_kecamatan: byKec
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// TREND HARIAN (7 hari terakhir)
+// ═══════════════════════════════════════════
+app.get('/api/trend', async (req, res) => {
+  try {
+    const { kecamatan, hari=7 } = req.query;
+    const match = {};
+    if (kecamatan) match.nmkec = kecamatan;
+
+    const trend = await Laporan.aggregate([
+      { $match: match },
+      { $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$tanggal' } },
+          total_usaha: { $sum: '$jumlah_usaha' },
+          total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_bangunan: { $sum: '$total_bangunan' },
+          jumlah_laporan: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } },
+      { $limit: Number(hari) }
+    ]);
+    res.json(trend);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// EXPORT CSV
+// ═══════════════════════════════════════════
+app.get('/api/export/csv', async (req, res) => {
+  try {
+    const { tanggal, kecamatan } = req.query;
+    const match = {};
+    if (tanggal) match.tanggal = new Date(tanggal);
+    if (kecamatan) match.nmkec = kecamatan;
+
+    const data = await Laporan.find(match).sort({ nmkec:1, nmdesa:1 }).lean();
+
+    const header = 'Tanggal,Kecamatan,Desa,SLS,PCL,Pengawas,Kel Non-Usaha,Usaha,Bgn Kosong,Total Bangunan,Catatan\n';
+    const rows = data.map(d => [
+      new Date(d.tanggal).toLocaleDateString('id-ID'),
+      d.nmkec, d.nmdesa, d.nmsubsls, d.pencacah, d.pengawas,
+      d.jumlah_keluarga_non_usaha, d.jumlah_usaha,
+      d.jumlah_bangunan_kosong, d.total_bangunan,
+      `"${(d.catatan||'').replace(/"/g,'""')}"`
+    ].join(',')).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="mata-se26-${tanggal||'all'}.csv"`);
+    res.send('\uFEFF' + header + rows); // BOM for Excel UTF-8
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// SERVE FRONTEND
+// ═══════════════════════════════════════════
+const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get('*', (req, res) => res.sendFile(path.join(frontendDist, 'index.html')));
+} else {
+  app.get('*', (req, res) => res.json({ app: 'MATA SE26 API', status: 'aktif' }));
+}
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log('MATA SE26 running on port ' + PORT));
