@@ -10,10 +10,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB error:', err));
-
 // ═══════════════════════════════════════════
 // WILAYAH
 // ═══════════════════════════════════════════
@@ -78,13 +74,10 @@ app.put('/api/laporan/:id', async (req, res) => {
     const { jumlah_keluarga_non_usaha, jumlah_usaha, jumlah_bangunan_kosong, total_bangunan, catatan } = req.body;
     const doc = await Laporan.findByIdAndUpdate(
       req.params.id,
-      {
-        jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
-        jumlah_usaha:              +jumlah_usaha              || 0,
-        jumlah_bangunan_kosong:    +jumlah_bangunan_kosong    || 0,
-        total_bangunan:            +total_bangunan            || 0,
-        catatan: catatan || '',
-      },
+      { jumlah_keluarga_non_usaha: +jumlah_keluarga_non_usaha || 0,
+        jumlah_usaha: +jumlah_usaha || 0,
+        jumlah_bangunan_kosong: +jumlah_bangunan_kosong || 0,
+        total_bangunan: +total_bangunan || 0, catatan: catatan || '' },
       { new: true, runValidators: true }
     );
     if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
@@ -144,10 +137,10 @@ app.get('/api/laporan', async (req, res) => {
   try {
     const { tanggal, pencacah, kecamatan, desa, page=1, limit=20 } = req.query;
     const q = {};
-    if (tanggal)  q.tanggal = new Date(tanggal);
-    if (pencacah) q.pencacah = new RegExp(pencacah, 'i');
-    if (kecamatan) q.nmkec = kecamatan;
-    if (desa) q.nmdesa = desa;
+    if (tanggal)   q.tanggal  = new Date(tanggal);
+    if (pencacah)  q.pencacah = new RegExp(pencacah, 'i');
+    if (kecamatan) q.nmkec    = kecamatan;
+    if (desa)      q.nmdesa   = desa;
     const skip = (Number(page)-1) * Number(limit);
     const [data, total] = await Promise.all([
       Laporan.find(q).sort({ tanggal:-1, created_at:-1 }).skip(skip).limit(Number(limit)).lean(),
@@ -158,7 +151,7 @@ app.get('/api/laporan', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════
-// LEADERBOARD PCL
+// LEADERBOARD
 // ═══════════════════════════════════════════
 app.get('/api/leaderboard', async (req, res) => {
   try {
@@ -166,94 +159,64 @@ app.get('/api/leaderboard', async (req, res) => {
     const match = {};
     if (tanggal_dari || tanggal_sampai) {
       match.tanggal = {};
-      if (tanggal_dari) match.tanggal.$gte = new Date(tanggal_dari);
+      if (tanggal_dari)  match.tanggal.$gte = new Date(tanggal_dari);
       if (tanggal_sampai) match.tanggal.$lte = new Date(tanggal_sampai);
     }
     if (kecamatan) match.nmkec = kecamatan;
-
     const rows = await Laporan.aggregate([
       { $match: match },
-      { $group: {
-          _id: '$pencacah',
-          nmkec: { $first: '$nmkec' },
-          pengawas: { $first: '$pengawas' },
-          total_usaha: { $sum: '$jumlah_usaha' },
-          total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_bangunan: { $sum: '$total_bangunan' },
-          hari_lapor: { $sum: 1 },
-          terakhir_lapor: { $max: '$tanggal' }
+      { $group: { _id: '$pencacah', nmkec: { $first: '$nmkec' }, pengawas: { $first: '$pengawas' },
+          total_usaha: { $sum: '$jumlah_usaha' }, total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_bangunan: { $sum: '$total_bangunan' }, hari_lapor: { $sum: 1 }, terakhir_lapor: { $max: '$tanggal' }
         }
       },
       { $addFields: { total_terdata: { $add: ['$total_usaha','$total_keluarga'] } } },
       { $sort: { total_terdata: -1 } }
     ]);
-
-    // Tambah rank
-    const ranked = rows.map((r, i) => ({ ...r, rank: i+1 }));
-    res.json(ranked);
+    res.json(rows.map((r, i) => ({ ...r, rank: i+1 })));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════
-// SLS BELUM LAPOR
+// BELUM LAPOR
 // ═══════════════════════════════════════════
 app.get('/api/belum-lapor', async (req, res) => {
   try {
     const { tanggal, kecamatan } = req.query;
     if (!tanggal) return res.status(400).json({ error: 'tanggal required' });
-
     const tgl = new Date(tanggal);
-
-    // Semua SLS di wilayah
     const slsQuery = kecamatan ? { nmkec: kecamatan } : {};
-    const semuaSls = await Wilayah.find(slsQuery, {
-      idsubsls:1, nmsubsls:1, nmkec:1, nmdesa:1, pencacah:1, pengawas:1, _id:0
-    }).lean();
-
-    // SLS yang sudah lapor
-    const sudahLapor = await Laporan.distinct('idsubsls', { tanggal: tgl, ...(kecamatan ? { nmkec: kecamatan } : {}) });
+    const [semuaSls, sudahLapor] = await Promise.all([
+      Wilayah.find(slsQuery, { idsubsls:1, nmsubsls:1, nmkec:1, nmdesa:1, pencacah:1, pengawas:1, _id:0 }).lean(),
+      Laporan.distinct('idsubsls', { tanggal: tgl, ...(kecamatan ? { nmkec: kecamatan } : {}) })
+    ]);
     const sudahSet = new Set(sudahLapor);
-
     const belum = semuaSls.filter(s => !sudahSet.has(s.idsubsls));
-
-    // Group by kecamatan
     const byKec = belum.reduce((acc, s) => {
       if (!acc[s.nmkec]) acc[s.nmkec] = [];
       acc[s.nmkec].push(s);
       return acc;
     }, {});
-
-    res.json({
-      total_sls: semuaSls.length,
-      sudah_lapor: sudahSet.size,
-      belum_lapor: belum.length,
-      pct_selesai: semuaSls.length > 0 ? ((sudahSet.size / semuaSls.length)*100).toFixed(1) : '0',
-      by_kecamatan: byKec
-    });
+    res.json({ total_sls: semuaSls.length, sudah_lapor: sudahSet.size, belum_lapor: belum.length,
+      pct_selesai: semuaSls.length > 0 ? ((sudahSet.size/semuaSls.length)*100).toFixed(1) : '0', by_kecamatan: byKec });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ═══════════════════════════════════════════
-// TREND HARIAN (7 hari terakhir)
+// TREND
 // ═══════════════════════════════════════════
 app.get('/api/trend', async (req, res) => {
   try {
     const { kecamatan, hari=7 } = req.query;
-    const match = {};
-    if (kecamatan) match.nmkec = kecamatan;
-
+    const match = kecamatan ? { nmkec: kecamatan } : {};
     const trend = await Laporan.aggregate([
       { $match: match },
-      { $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$tanggal' } },
-          total_usaha: { $sum: '$jumlah_usaha' },
-          total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
-          total_bangunan: { $sum: '$total_bangunan' },
-          jumlah_laporan: { $sum: 1 }
+      { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$tanggal' } },
+          total_usaha: { $sum: '$jumlah_usaha' }, total_keluarga: { $sum: '$jumlah_keluarga_non_usaha' },
+          total_bangunan: { $sum: '$total_bangunan' }, jumlah_laporan: { $sum: 1 }
         }
       },
-      { $sort: { _id: 1 } },
-      { $limit: Number(hari) }
+      { $sort: { _id: 1 } }, { $limit: Number(hari) }
     ]);
     res.json(trend);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -266,24 +229,29 @@ app.get('/api/export/csv', async (req, res) => {
   try {
     const { tanggal, kecamatan } = req.query;
     const match = {};
-    if (tanggal) match.tanggal = new Date(tanggal);
-    if (kecamatan) match.nmkec = kecamatan;
-
+    if (tanggal)   match.tanggal = new Date(tanggal);
+    if (kecamatan) match.nmkec   = kecamatan;
     const data = await Laporan.find(match).sort({ nmkec:1, nmdesa:1 }).lean();
-
     const header = 'Tanggal,Kecamatan,Desa,SLS,PCL,Pengawas,Kel Non-Usaha,Usaha,Bgn Kosong,Total Bangunan,Catatan\n';
     const rows = data.map(d => [
       new Date(d.tanggal).toLocaleDateString('id-ID'),
       d.nmkec, d.nmdesa, d.nmsubsls, d.pencacah, d.pengawas,
-      d.jumlah_keluarga_non_usaha, d.jumlah_usaha,
-      d.jumlah_bangunan_kosong, d.total_bangunan,
+      d.jumlah_keluarga_non_usaha, d.jumlah_usaha, d.jumlah_bangunan_kosong, d.total_bangunan,
       `"${(d.catatan||'').replace(/"/g,'""')}"`
     ].join(',')).join('\n');
-
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="mata-se26-${tanggal||'all'}.csv"`);
-    res.send('\uFEFF' + header + rows); // BOM for Excel UTF-8
+    res.send('\uFEFF' + header + rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════
+// HEALTH CHECK
+// ═══════════════════════════════════════════
+app.get('/api/health', (req, res) => {
+  const state = mongoose.connection.readyState;
+  const states = { 0:'disconnected', 1:'connected', 2:'connecting', 3:'disconnecting' };
+  res.json({ status: 'ok', mongodb: states[state] || 'unknown', uptime: process.uptime() });
 });
 
 // ═══════════════════════════════════════════
@@ -292,10 +260,41 @@ app.get('/api/export/csv', async (req, res) => {
 const frontendDist = path.join(__dirname, '..', 'frontend', 'dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
-  app.get('*', (req, res) => res.sendFile(path.join(frontendDist, 'index.html')));
+  // Hanya serve index.html untuk non-API route (SPA fallback)
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
 } else {
-  app.get('*', (req, res) => res.json({ app: 'MATA SE26 API', status: 'aktif' }));
+  // Kalau frontend belum di-build, tampilkan info API
+  app.get(/^(?!\/api).*/, (req, res) => {
+    res.json({ app: 'MATA SE26 API', status: 'aktif', mongodb: mongoose.connection.readyState });
+  });
 }
 
+// ═══════════════════════════════════════════
+// START — tunggu MongoDB tersambung dulu
+// ═══════════════════════════════════════════
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log('MATA SE26 running on port ' + PORT));
+
+const MONGO_URI = process.env.MONGODB_URI;
+if (!MONGO_URI) {
+  console.error('ERROR: MONGODB_URI environment variable tidak ditemukan!');
+  process.exit(1);
+}
+
+console.log('Connecting to MongoDB...');
+mongoose.connect(MONGO_URI, {
+  serverSelectionTimeoutMS: 30000, // 30 detik timeout (Railway bisa lambat)
+  socketTimeoutMS: 45000,
+  connectTimeoutMS: 30000,
+  maxPoolSize: 10,
+})
+.then(() => {
+  console.log('MongoDB connected!');
+  app.listen(PORT, () => console.log(`MATA SE26 server running on port ${PORT}`));
+})
+.catch(err => {
+  console.error('MongoDB connection FAILED:', err.message);
+  console.error('URI prefix:', MONGO_URI.slice(0, 30) + '...');
+  process.exit(1); // Railway akan restart otomatis
+});
