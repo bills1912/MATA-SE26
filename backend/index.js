@@ -298,6 +298,38 @@ app.get('/api/export/csv', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/api/laporan/p6-detail', async (req, res) => {
+  try {
+    const { tanggal, kecamatan } = req.query;
+ 
+    // Hanya ambil laporan yang punya P6 > 0
+    const match = { jumlah_belum_submit: { $gt: 0 } };
+    if (tanggal)   match.tanggal = new Date(tanggal);
+    if (kecamatan) match.nmkec   = kecamatan;
+ 
+    const rows = await Laporan.find(match, {
+      nmkec: 1, nmdesa: 1, nmsubsls: 1,
+      pencacah: 1, pengawas: 1,
+      jumlah_belum_submit: 1,
+      catatan_belum_submit: 1,
+      catatan: 1,
+      _id: 0,
+    }).sort({ nmkec: 1, nmdesa: 1 }).lean();
+ 
+    // Group by kecamatan agar frontend bisa langsung lookup by key
+    const byKec = rows.reduce((acc, r) => {
+      const k = r.nmkec || 'Lainnya';
+      if (!acc[k]) acc[k] = [];
+      acc[k].push(r);
+      return acc;
+    }, {});
+ 
+    res.json(byKec);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ═══════════════════════════════════════════
 // HEALTH CHECK
 // ═══════════════════════════════════════════
