@@ -1,10 +1,22 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import DateInput, { formatTanggal } from '../components/DateInput';
+import DateInput, { formatTanggal, todayStr } from '../components/DateInput';
 import SearchSelect from '../components/SearchSelect';
 import EditModal    from '../components/EditModal';
 import ConfirmModal from '../components/ConfirmModal';
 import { laporanApi, wilayahApi } from '../utils/api';
+
+// Helper — apakah tanggal string = hari ini (lokal)
+function isToday(dateValue) {
+  if (!dateValue) return false;
+  const d = new Date(dateValue);
+  const today = new Date();
+  return (
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth()    === today.getMonth()    &&
+    d.getDate()     === today.getDate()
+  );
+}
 
 export default function Riwayat() {
   const [tanggal,      setTanggal]      = useState('');
@@ -17,10 +29,9 @@ export default function Riwayat() {
   const [totalPages,   setTotalPages]   = useState(1);
   const [loading,      setLoading]      = useState(false);
 
-  // Modal state
-  const [editItem,    setEditItem]    = useState(null); // laporan yang sedang di-edit
-  const [deleteItem,  setDeleteItem]  = useState(null); // laporan yang mau dihapus
-  const [deleting,    setDeleting]    = useState(false);
+  const [editItem,   setEditItem]   = useState(null);
+  const [deleteItem, setDeleteItem] = useState(null);
+  const [deleting,   setDeleting]   = useState(false);
 
   useEffect(() => {
     wilayahApi.getKecamatan().then(r => setKecamatanList(r.data)).catch(() => {});
@@ -54,7 +65,9 @@ export default function Riwayat() {
       setDeleteItem(null);
       loadData(page);
     } catch (err) {
-      toast.error('Gagal menghapus: ' + (err.response?.data?.error || err.message));
+      // Tangkap error 403 dari backend
+      const msg = err.response?.data?.error || err.message;
+      toast.error(msg);
     } finally {
       setDeleting(false);
     }
@@ -67,6 +80,10 @@ export default function Riwayat() {
     const parts = full.split(',');
     return parts.length > 1 ? parts.slice(1).join(',').trim() : full;
   };
+
+  // Hitung berapa item yang bisa diedit (hari ini)
+  const countEditable = data.filter(item => isToday(item.tanggal)).length;
+  const countLocked   = data.length - countEditable;
 
   return (
     <div className="page">
@@ -99,6 +116,21 @@ export default function Riwayat() {
         <span className="badge badge-purple">{total.toLocaleString('id-ID')} data</span>
       </div>
 
+      {/* Banner kunci — muncul kalau ada laporan lama di halaman ini */}
+      {!loading && countLocked > 0 && (
+        <div className="alert alert-info" style={{ marginBottom: 14 }}>
+          <span>🔒</span>
+          <div>
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>
+              {countLocked} laporan dari hari sebelumnya dikunci
+            </div>
+            <div style={{ fontSize: 12, opacity: 0.85 }}>
+              Laporan yang sudah disubmit di hari sebelumnya hanya dapat dilihat, tidak dapat diubah atau dihapus.
+            </div>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="loading"><div className="spinner"/><div className="loading-text">Memuat riwayat...</div></div>
       ) : data.length === 0 ? (
@@ -110,61 +142,96 @@ export default function Riwayat() {
       ) : (
         <>
           <div className="riwayat-grid">
-            {data.map((item) => (
-              <div
-                key={item._id}
-                className={'list-item ' + (item.jumlah_usaha > 0 ? 'green-accent' : 'purple-accent')}
-              >
-                {/* Baris atas: lokasi + tanggal */}
-                <div className="list-item-head">
-                  <div style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
-                    <div className="list-item-title">{item.nmdesa}</div>
-                    <div className="list-item-sub">{item.nmkec} · {item.nmsubsls}</div>
+            {data.map((item) => {
+              const editable = isToday(item.tanggal);
+              return (
+                <div
+                  key={item._id}
+                  className={'list-item ' + (item.jumlah_usaha_submit > 0 ? 'green-accent' : 'purple-accent')}
+                  style={!editable ? { opacity: 0.82 } : {}}
+                >
+                  {/* Baris atas: lokasi + tanggal */}
+                  <div className="list-item-head">
+                    <div style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                      <div className="list-item-title">{item.nmdesa}</div>
+                      <div className="list-item-sub">{item.nmkec} · {item.nmsubsls}</div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                      <span className="badge badge-amber" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>
+                        {getDateLabel(item.tanggal)}
+                      </span>
+                      {/* Badge kunci untuk laporan lama */}
+                      {!editable && (
+                        <span className="badge" style={{
+                          fontSize: 10, whiteSpace: 'nowrap',
+                          background: 'rgba(255,255,255,0.06)',
+                          color: 'var(--text3)',
+                          border: '1px solid var(--border)',
+                        }}>
+                          🔒 Dikunci
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="badge badge-amber" style={{ fontSize: 10, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                    {getDateLabel(item.tanggal)}
-                  </span>
-                </div>
 
-                {/* PCL */}
-                <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span>👤</span> {item.pencacah}
-                </div>
+                  {/* PCL */}
+                  <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>👤</span> {item.pencacah}
+                  </div>
 
-                {/* Data chips */}
-                <div className="chip-row">
-                  <div className="chip">🏢 <strong>{fmt(item.jumlah_usaha)}</strong> usaha</div>
-                  <div className="chip">🏠 <strong>{fmt(item.jumlah_keluarga_non_usaha)}</strong> kel</div>
-                  <div className="chip">🏗️ <strong>{fmt(item.total_bangunan)}</strong> bgn</div>
-                  {item.jumlah_bangunan_kosong > 0 && (
-                    <div className="chip">⬜ <strong>{fmt(item.jumlah_bangunan_kosong)}</strong> kosong</div>
+                  {/* Data chips */}
+                  <div className="chip-row">
+                    <div className="chip">🏢 <strong>{fmt(item.jumlah_usaha_submit)}</strong> usaha</div>
+                    <div className="chip">🏠 <strong>{fmt(item.jumlah_keluarga_submit)}</strong> kel</div>
+                    <div className="chip">🏗️ <strong>{fmt(item.total_bangunan)}</strong> bgn</div>
+                    {item.jumlah_bangunan_kosong > 0 && (
+                      <div className="chip">⬜ <strong>{fmt(item.jumlah_bangunan_kosong)}</strong> kosong</div>
+                    )}
+                    {item.jumlah_belum_submit > 0 && (
+                      <div className="chip" style={{ borderColor: 'rgba(245,158,11,0.3)', color: '#fcd34d' }}>
+                        ⏳ <strong>{fmt(item.jumlah_belum_submit)}</strong> blm submit
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Catatan belum submit */}
+                  {item.catatan_belum_submit && (
+                    <div style={{ marginTop: 6, fontSize: 12, color: '#fcd34d', fontStyle: 'italic', lineHeight: 1.5 }}>
+                      ⏳ {item.catatan_belum_submit}
+                    </div>
+                  )}
+
+                  {/* Catatan umum */}
+                  {item.catatan && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text3)', fontStyle: 'italic', lineHeight: 1.5 }}>
+                      📝 {item.catatan}
+                    </div>
+                  )}
+
+                  {/* Tombol aksi — hanya tampil jika hari ini */}
+                  {editable ? (
+                    <div className="item-actions">
+                      <button className="action-btn action-btn-edit" onClick={() => setEditItem(item)}>
+                        ✏️ Edit
+                      </button>
+                      <button className="action-btn action-btn-delete" onClick={() => setDeleteItem(item)}>
+                        🗑️ Hapus
+                      </button>
+                    </div>
+                  ) : (
+                    /* Keterangan read-only untuk laporan lama */
+                    <div style={{
+                      marginTop: 10, paddingTop: 8,
+                      borderTop: '1px solid var(--border)',
+                      fontSize: 11, color: 'var(--text3)',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}>
+                      🔒 Laporan ini sudah terkunci — hanya dapat dilihat
+                    </div>
                   )}
                 </div>
-
-                {/* Catatan */}
-                {item.catatan && (
-                  <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text3)', fontStyle: 'italic', lineHeight: 1.5 }}>
-                    📝 {item.catatan}
-                  </div>
-                )}
-
-                {/* Tombol aksi */}
-                <div className="item-actions">
-                  <button
-                    className="action-btn action-btn-edit"
-                    onClick={() => setEditItem(item)}
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    className="action-btn action-btn-delete"
-                    onClick={() => setDeleteItem(item)}
-                  >
-                    🗑️ Hapus
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Pagination */}

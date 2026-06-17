@@ -7,7 +7,9 @@ import SlsSelect from '../components/SlsSelect';
 import { wilayahApi, laporanApi } from '../utils/api';
 
 export default function FormLaporan() {
-  const [tanggal,   setTanggal]   = useState(todayStr());
+  // ── Tanggal dikunci ke hari ini — tidak bisa diganti ──
+  const tanggal = todayStr();
+
   const [kecamatan, setKecamatan] = useState('');
   const [desa,      setDesa]      = useState('');
   const [slsId,     setSlsId]     = useState('');
@@ -18,23 +20,22 @@ export default function FormLaporan() {
   const [wilayahInfo,   setWilayahInfo]   = useState(null);
 
   // ── 6 field utama ──
-  const [keluargaSubmit,   setKeluargaSubmit]   = useState(0); // P1
-  const [usahaSubmit,      setUsahaSubmit]       = useState(0); // P2
-  const [bkuSubmit,        setBkuSubmit]         = useState(0); // P3
-  const [bangunanKosong,   setBangunanKosong]    = useState(0); // P4
-  const [totalBangunan,    setTotalBangunan]     = useState(0); // P5
-  const [belumSubmit,      setBelumSubmit]       = useState(0); // P6
-  const [catatanBelumSubmit, setCatatanBelumSubmit] = useState(''); // wajib jika P6>0
+  const [keluargaSubmit,     setKeluargaSubmit]     = useState(0);
+  const [usahaSubmit,        setUsahaSubmit]         = useState(0);
+  const [bkuSubmit,          setBkuSubmit]           = useState(0);
+  const [bangunanKosong,     setBangunanKosong]      = useState(0);
+  const [totalBangunan,      setTotalBangunan]       = useState(0);
+  const [belumSubmit,        setBelumSubmit]         = useState(0);
+  const [catatanBelumSubmit, setCatatanBelumSubmit]  = useState('');
+  const [catatan,            setCatatan]             = useState('');
 
-  const [catatan, setCatatan] = useState('');
-
-  const [loading,        setLoading]       = useState(false);
-  const [loadingKec,     setLoadingKec]    = useState(true);
-  const [loadingDesa,    setLoadingDesa]   = useState(false);
-  const [loadingSls,     setLoadingSls]    = useState(false);
-  const [checkingExist,  setCheckingExist] = useState(false);
-  const [existing,       setExisting]      = useState(null);
-  const [submitted,      setSubmitted]     = useState(false);
+  const [loading,       setLoading]      = useState(false);
+  const [loadingKec,    setLoadingKec]   = useState(true);
+  const [loadingDesa,   setLoadingDesa]  = useState(false);
+  const [loadingSls,    setLoadingSls]   = useState(false);
+  const [checkingExist, setCheckingExist] = useState(false);
+  const [existing,      setExisting]     = useState(null);
+  const [submitted,     setSubmitted]    = useState(false);
 
   // ── Load kecamatan ──
   useEffect(() => {
@@ -71,7 +72,7 @@ export default function FormLaporan() {
     wilayahApi.getDetail(slsId).then(r => setWilayahInfo(r.data)).catch(() => {});
   }, [slsId]);
 
-  // ── Cek laporan existing ──
+  // ── Cek laporan existing — hanya hari ini (backend sudah filter) ──
   useEffect(() => {
     if (!slsId || !tanggal) {
       setExisting(null); setSubmitted(false); resetForm(); return;
@@ -154,16 +155,33 @@ export default function FormLaporan() {
   return (
     <div className="page" style={{ paddingBottom: 32 }}>
 
-      {/* ── Tanggal ── */}
+      {/* ── Tanggal — read-only, selalu hari ini ── */}
       <div className="card">
         <div className="card-header">
           <div className="card-icon purple">📅</div>
           <div>
             <div className="card-title-text">Tanggal Pelaporan</div>
-            <div className="card-title-sub">Pilih tanggal pendataan Anda hari ini</div>
+            <div className="card-title-sub">Pelaporan hanya dapat dilakukan untuk hari ini</div>
           </div>
         </div>
-        <DateInput value={tanggal} onChange={(v) => { setTanggal(v); setSubmitted(false); }} />
+        {/* Tampilkan tanggal hari ini sebagai pill statis, tanpa DateInput */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '13px 15px',
+          background: 'rgba(99,102,241,0.08)',
+          border: '1.5px solid rgba(99,102,241,0.3)',
+          borderRadius: 'var(--r-sm)',
+          fontSize: 14, fontWeight: 700, color: 'var(--text)',
+        }}>
+          <span>📅</span>
+          <span>{formatTanggal(tanggal)}</span>
+          <span style={{
+            marginLeft: 'auto', fontSize: 10, fontWeight: 700,
+            background: 'rgba(16,185,129,0.15)', color: '#6ee7b7',
+            border: '1px solid rgba(16,185,129,0.3)',
+            borderRadius: 20, padding: '2px 10px',
+          }}>Hari Ini</span>
+        </div>
       </div>
 
       {/* ── Wilayah ── */}
@@ -233,9 +251,9 @@ export default function FormLaporan() {
         <div className="alert alert-warning">
           <span>⚠️</span>
           <div>
-            <div style={{ fontWeight: 700, marginBottom: 3 }}>SLS ini sudah pernah melapor hari ini</div>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>SLS ini sudah melapor hari ini</div>
             <div style={{ fontSize: 12, opacity: 0.85 }}>
-              Data lama ditampilkan di bawah. Ubah angka yang perlu diperbaiki lalu tekan <strong>Perbarui Laporan</strong>.
+              Data hari ini ditampilkan. Ubah angka yang perlu diperbaiki lalu tekan <strong>Perbarui Laporan</strong>.
             </div>
           </div>
         </div>
@@ -282,60 +300,44 @@ export default function FormLaporan() {
             </div>
           </div>
 
-          {/* P1 */}
           <NumberInput
             label="1. Jumlah Keluarga yang Berhasil Disubmit"
             value={keluargaSubmit} onChange={setKeluargaSubmit}
             helpText="Keluarga yang tidak memiliki usaha dan sudah berhasil disubmit di aplikasi"
           />
-
-          {/* P2 */}
           <NumberInput
             label="2. Jumlah Usaha dari Keluarga yang Berhasil Disubmit"
             value={usahaSubmit} onChange={setUsahaSubmit}
             helpText="Keluarga yang memiliki usaha dan sudah berhasil disubmit di aplikasi"
           />
-
-          {/* P3 */}
           <NumberInput
             label="3. Jumlah BKU (Bangunan Khusus Usaha) yang Berhasil Disubmit"
             value={bkuSubmit} onChange={setBkuSubmit}
             helpText="Bangunan yang digunakan khusus untuk usaha (toko, warung, kantor, dll)"
           />
-
-          {/* P4 */}
           <NumberInput
             label="4. Jumlah Bangunan Kosong / Non-Hunian yang Berhasil Disubmit"
             value={bangunanKosong} onChange={setBangunanKosong}
             helpText="Tempat ibadah, gedung kosong, bangunan tidak berpenghuni"
           />
-
-          {/* P5 */}
           <NumberInput
             label="5. Total Bangunan yang Sudah Disticker"
             value={totalBangunan} onChange={setTotalBangunan}
             helpText="Jumlah seluruh bangunan yang sudah diberi stiker SE2026"
           />
 
-          {/* Divider sebelum P6 */}
-          <div style={{
-            margin: '4px 0 16px',
-            borderTop: '1px dashed var(--border)',
-            paddingTop: 16,
-          }}>
+          <div style={{ margin: '4px 0 16px', borderTop: '1px dashed var(--border)', paddingTop: 16 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--amber)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 12 }}>
               ⏳ Responden Belum Submit
             </div>
           </div>
 
-          {/* P6 */}
           <NumberInput
             label="6. Jumlah Responden Sudah Didata tapi Belum Submit"
             value={belumSubmit} onChange={setBelumSubmit}
             helpText="Responden yang sudah selesai wawancara tapi belum berhasil disubmit (HP rusak, sinyal, dll)"
           />
 
-          {/* Catatan kendala — wajib jika P6 > 0 */}
           {belumSubmit > 0 && (
             <div className="form-group">
               <div className="form-label" style={{ color: 'var(--amber)' }}>
@@ -346,7 +348,7 @@ export default function FormLaporan() {
                 value={catatanBelumSubmit}
                 onChange={e => setCatatanBelumSubmit(e.target.value)}
                 rows={3}
-                placeholder="Jelaskan kendala atau alasan responden belum berhasil disubmit (HP rusak, sinyal buruk, aplikasi error, dll)..."
+                placeholder="Jelaskan kendala atau alasan responden belum berhasil disubmit..."
                 style={{
                   resize: 'vertical', minHeight: 80, lineHeight: 1.5,
                   borderColor: catatanBelumSubmit.trim() ? 'var(--border)' : 'rgba(245,158,11,0.5)',
@@ -360,7 +362,6 @@ export default function FormLaporan() {
             </div>
           )}
 
-          {/* Ringkasan total terdata */}
           {totalSubmit > 0 && (
             <div className="alert alert-info" style={{ marginTop: 4 }}>
               <span>✨</span>
@@ -375,7 +376,6 @@ export default function FormLaporan() {
             </div>
           )}
 
-          {/* Catatan umum */}
           <div className="form-group" style={{ marginTop: 4 }}>
             <div className="form-label">Catatan / Kendala Lapangan (Opsional)</div>
             <textarea
@@ -388,7 +388,6 @@ export default function FormLaporan() {
             />
           </div>
 
-          {/* Submit */}
           <div style={{ marginTop: 10 }}>
             <button
               className="btn btn-primary"

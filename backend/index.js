@@ -11,6 +11,20 @@ app.use(cors());
 app.use(express.json());
 
 // ═══════════════════════════════════════════
+// HELPER — apakah tanggal = hari ini (WIB)?
+// ═══════════════════════════════════════════
+function isToday(dateValue) {
+  // Normalize ke YYYY-MM-DD string di zona WIB (UTC+7)
+  const toDateStr = (d) => {
+    const dt = new Date(d);
+    // Geser ke WIB
+    const wib = new Date(dt.getTime() + 7 * 60 * 60 * 1000);
+    return wib.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  };
+  return toDateStr(dateValue) === toDateStr(new Date());
+}
+
+// ═══════════════════════════════════════════
 // WILAYAH
 // ═══════════════════════════════════════════
 
@@ -45,6 +59,7 @@ app.get('/api/wilayah/:idsubsls', async (req, res) => {
 // LAPORAN — CRUD
 // ═══════════════════════════════════════════
 
+// POST /api/laporan — hanya boleh submit untuk hari ini
 app.post('/api/laporan', async (req, res) => {
   try {
     const {
@@ -54,6 +69,14 @@ app.post('/api/laporan', async (req, res) => {
       jumlah_belum_submit, catatan_belum_submit,
       catatan
     } = req.body;
+
+    // ── VALIDASI: hanya boleh submit untuk hari ini ──
+    if (!isToday(tanggal)) {
+      return res.status(403).json({
+        error: 'Laporan hanya dapat dibuat untuk tanggal hari ini',
+        code: 'DATE_NOT_TODAY'
+      });
+    }
 
     const doc = await Laporan.findOneAndUpdate(
       { tanggal: new Date(tanggal), idsubsls },
@@ -74,15 +97,39 @@ app.post('/api/laporan', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// DELETE /api/laporan/:id — hanya boleh hapus laporan hari ini
 app.delete('/api/laporan/:id', async (req, res) => {
   try {
+    const doc = await Laporan.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
+
+    // ── VALIDASI: hanya boleh hapus laporan hari ini ──
+    if (!isToday(doc.tanggal)) {
+      return res.status(403).json({
+        error: 'Laporan dari tanggal sebelumnya tidak dapat dihapus',
+        code: 'DATE_NOT_TODAY'
+      });
+    }
+
     await Laporan.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// PUT /api/laporan/:id — hanya boleh edit laporan hari ini
 app.put('/api/laporan/:id', async (req, res) => {
   try {
+    const existing = await Laporan.findById(req.params.id).lean();
+    if (!existing) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
+
+    // ── VALIDASI: hanya boleh edit laporan hari ini ──
+    if (!isToday(existing.tanggal)) {
+      return res.status(403).json({
+        error: 'Laporan dari tanggal sebelumnya tidak dapat diubah',
+        code: 'DATE_NOT_TODAY'
+      });
+    }
+
     const {
       jumlah_keluarga_submit, jumlah_usaha_submit, jumlah_bku_submit,
       jumlah_bangunan_kosong, total_bangunan,
@@ -104,14 +151,20 @@ app.put('/api/laporan/:id', async (req, res) => {
       },
       { new: true, runValidators: true }
     );
-    if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
     res.json({ success: true, laporan: doc });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// GET /api/laporan/check — hanya return data jika tanggal = hari ini
 app.get('/api/laporan/check', async (req, res) => {
   try {
     const { tanggal, idsubsls } = req.query;
+
+    // ── Jika bukan hari ini, kembalikan null (seolah belum ada laporan) ──
+    if (!isToday(tanggal)) {
+      return res.json(null);
+    }
+
     res.json(await Laporan.findOne({ tanggal: new Date(tanggal), idsubsls }).lean() || null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -301,12 +354,9 @@ app.get('/api/export/csv', async (req, res) => {
 app.get('/api/laporan/p6-detail', async (req, res) => {
   try {
     const { tanggal, kecamatan } = req.query;
- 
-    // Hanya ambil laporan yang punya P6 > 0
     const match = { jumlah_belum_submit: { $gt: 0 } };
     if (tanggal)   match.tanggal = new Date(tanggal);
     if (kecamatan) match.nmkec   = kecamatan;
- 
     const rows = await Laporan.find(match, {
       nmkec: 1, nmdesa: 1, nmsubsls: 1,
       pencacah: 1, pengawas: 1,
@@ -315,15 +365,12 @@ app.get('/api/laporan/p6-detail', async (req, res) => {
       catatan: 1,
       _id: 0,
     }).sort({ nmkec: 1, nmdesa: 1 }).lean();
- 
-    // Group by kecamatan agar frontend bisa langsung lookup by key
     const byKec = rows.reduce((acc, r) => {
       const k = r.nmkec || 'Lainnya';
       if (!acc[k]) acc[k] = [];
       acc[k].push(r);
       return acc;
     }, {});
- 
     res.json(byKec);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -355,10 +402,9 @@ if (fs.existsSync(frontendDist)) {
 }
 
 // ═══════════════════════════════════════════
-// START — tunggu MongoDB tersambung dulu
+// START
 // ═══════════════════════════════════════════
 const PORT = process.env.PORT || 5000;
-
 const MONGO_URI = process.env.MONGODB_URI;
 if (!MONGO_URI) {
   console.error('ERROR: MONGODB_URI environment variable tidak ditemukan!');
@@ -378,6 +424,5 @@ mongoose.connect(MONGO_URI, {
 })
 .catch(err => {
   console.error('MongoDB connection FAILED:', err.message);
-  console.error('URI prefix:', MONGO_URI.slice(0, 30) + '...');
   process.exit(1);
 });
