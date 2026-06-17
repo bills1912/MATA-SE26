@@ -14,12 +14,10 @@ app.use(express.json());
 // HELPER — apakah tanggal = hari ini (WIB)?
 // ═══════════════════════════════════════════
 function isToday(dateValue) {
-  // Normalize ke YYYY-MM-DD string di zona WIB (UTC+7)
   const toDateStr = (d) => {
     const dt = new Date(d);
-    // Geser ke WIB
     const wib = new Date(dt.getTime() + 7 * 60 * 60 * 1000);
-    return wib.toISOString().slice(0, 10); // "YYYY-MM-DD"
+    return wib.toISOString().slice(0, 10);
   };
   return toDateStr(dateValue) === toDateStr(new Date());
 }
@@ -59,7 +57,8 @@ app.get('/api/wilayah/:idsubsls', async (req, res) => {
 // LAPORAN — CRUD
 // ═══════════════════════════════════════════
 
-// POST /api/laporan — hanya boleh submit untuk hari ini
+// POST /api/laporan — boleh submit untuk tanggal mana pun (tidak hanya hari ini)
+// Jika sudah ada data di tanggal+SLS yang sama, akan di-overwrite (upsert)
 app.post('/api/laporan', async (req, res) => {
   try {
     const {
@@ -70,11 +69,18 @@ app.post('/api/laporan', async (req, res) => {
       catatan
     } = req.body;
 
-    // ── VALIDASI: hanya boleh submit untuk hari ini ──
-    if (!isToday(tanggal)) {
+    if (!tanggal || !idsubsls) {
+      return res.status(400).json({ error: 'tanggal dan idsubsls wajib diisi' });
+    }
+
+    // Tidak boleh submit untuk tanggal masa depan
+    const tglInput = new Date(tanggal);
+    const tglInputStr = new Date(tglInput.getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const todayStr = new Date(new Date().getTime() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (tglInputStr > todayStr) {
       return res.status(403).json({
-        error: 'Laporan hanya dapat dibuat untuk tanggal hari ini',
-        code: 'DATE_NOT_TODAY'
+        error: 'Laporan tidak dapat dibuat untuk tanggal masa depan',
+        code: 'DATE_IN_FUTURE'
       });
     }
 
@@ -97,13 +103,12 @@ app.post('/api/laporan', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// DELETE /api/laporan/:id — hanya boleh hapus laporan hari ini
+// DELETE /api/laporan/:id — hanya boleh hapus laporan hari ini (proteksi data historis)
 app.delete('/api/laporan/:id', async (req, res) => {
   try {
     const doc = await Laporan.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
 
-    // ── VALIDASI: hanya boleh hapus laporan hari ini ──
     if (!isToday(doc.tanggal)) {
       return res.status(403).json({
         error: 'Laporan dari tanggal sebelumnya tidak dapat dihapus',
@@ -116,19 +121,11 @@ app.delete('/api/laporan/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PUT /api/laporan/:id — hanya boleh edit laporan hari ini
+// PUT /api/laporan/:id — boleh edit laporan tanggal mana pun (tidak hanya hari ini)
 app.put('/api/laporan/:id', async (req, res) => {
   try {
     const existing = await Laporan.findById(req.params.id).lean();
     if (!existing) return res.status(404).json({ error: 'Laporan tidak ditemukan' });
-
-    // ── VALIDASI: hanya boleh edit laporan hari ini ──
-    if (!isToday(existing.tanggal)) {
-      return res.status(403).json({
-        error: 'Laporan dari tanggal sebelumnya tidak dapat diubah',
-        code: 'DATE_NOT_TODAY'
-      });
-    }
 
     const {
       jumlah_keluarga_submit, jumlah_usaha_submit, jumlah_bku_submit,
@@ -155,16 +152,12 @@ app.put('/api/laporan/:id', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// GET /api/laporan/check — hanya return data jika tanggal = hari ini
+// GET /api/laporan/check — return data existing untuk tanggal + SLS apapun
+// Frontend akan gunakan ini untuk menampilkan warning jika data sudah ada
 app.get('/api/laporan/check', async (req, res) => {
   try {
     const { tanggal, idsubsls } = req.query;
-
-    // ── Jika bukan hari ini, kembalikan null (seolah belum ada laporan) ──
-    if (!isToday(tanggal)) {
-      return res.json(null);
-    }
-
+    if (!tanggal || !idsubsls) return res.json(null);
     res.json(await Laporan.findOne({ tanggal: new Date(tanggal), idsubsls }).lean() || null);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
